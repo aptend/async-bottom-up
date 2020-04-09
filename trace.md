@@ -190,3 +190,27 @@ em，既然在条件变量和channel里面选，那自然还是channel好用
 但再想这个具体的场景，可能存在很多task的Waker，在某一时间可能都要给executor发消息激活一下，理想状况下，应该是一个`bounded(1)`的有界`channel`，但是发送方不阻塞(`try_send`)，满了就跳过。此时executor被唤醒，执行下一次`[wake_tasks -> run_ready_tasks]`的循环。有可能在`wake_tasks`时出现新的可用任务，`channel`当然被填上，但是新任务也被`wake_tasks`取走，等`run_ready_tasks`完成，`sleep_if_idle`时检查到新任务为空，但是`channel`中存在item，因为无法确定这个item到底是什么时候产生的，`wake_tasks`还是`run_ready_tasks`，只好再尝试循环一遍。
 
 > 💡又搜到这个文章，用的却是park/unpark，之后对比看 [构建你自己的block_on](https://colobu.com/2020/01/30/build-your-own-block-on/)
+
+
+呆瓜block_on
+```rust
+pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
+    let mut exec = Executor::new();
+    exec.spawn(Task::new(f));
+    exec.run();
+}
+```
+
+```shell
+test custom_block_on_0_yields   ... bench:         747 ns/iter (+/- 58)
+test custom_block_on_10_yields  ... bench:       4,502 ns/iter (+/- 406)
+test custom_block_on_50_yields  ... bench:      19,220 ns/iter (+/- 1,581)
+test futures_block_on_0_yields  ... bench:           9 ns/iter (+/- 0)
+test futures_block_on_10_yields ... bench:         211 ns/iter (+/- 9)
+test futures_block_on_50_yields ... bench:       1,032 ns/iter (+/- 49)
+```
+
+tomorrow TODO:
+
+- 用criterion做一下测试看
+- 对block_on而言，`waiting_tasks`这种东西不需要，重写一下，看基于park/unpark和channel的区别

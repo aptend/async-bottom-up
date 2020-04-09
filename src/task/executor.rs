@@ -138,3 +138,8 @@ impl Executor {
     }
 }
 
+pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
+    let mut exec = Executor::new();
+    exec.spawn(Task::new(f));
+    exec.run();
+}
