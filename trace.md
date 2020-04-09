@@ -1,3 +1,5 @@
+Source: [**write an os in rust: async and await**](https://github.com/rustcc/writing-an-os-in-rust/blob/master/12-async-await.md)
+
 ## Waker
 
 ### 创建
@@ -40,6 +42,7 @@ pub const fn new(clone, wake, wake_by_ref, drop) -> RawWakerVTable
 
 ### 可通知的Waker
 
+#### crossbeam::queue
 
 `crossbeam::queue`，线程安全的队列，每个修改内部状态的函数都可以通过`&self`执行。和`channel`的阻塞不同，边缘事件直接返回错误:
 
@@ -51,7 +54,7 @@ pub const fn new(clone, wake, wake_by_ref, drop) -> RawWakerVTable
 
 > ❓ 那async_std中的future应该使用的是epoll之类的，可以使用`SegQueue`吗？
 
-SimpleExecutor -> Executor
+#### SimpleExecutor -> Executor
 
 ```rust
 pub struct Executor {
@@ -71,7 +74,7 @@ pub struct Executor {
 }
 ```
 
-TaskWaker
+#### TaskWaker
 
 `reactor`显然应该通过`Waker.wake`能向`wake_queue`添加准备好执行的任务id
 
@@ -89,7 +92,7 @@ impl TaskWaker {
 }
 ```
 
-安全地构造Waker
+#### 安全地构造Waker
 
 在1.44-nightly中才会有`std::task::Wake` Trait。在`futures-0.3.4`中存在相似的`futures::ArcWake`。
 
@@ -176,3 +179,14 @@ struct Inner {
 本来文档说`park`可能会无缘无故地醒来，但实现因为用了条件变量和互斥锁，并且还会检查原子变量，无缘无故醒来的情况实际上被内部处理，只是之后可能会换更有效率的实现，所以文档就没有改
 
 em，既然在条件变量和channel里面选，那自然还是channel好用
+
+#### crossbeam::channel
+作为`std::sync::mpsc`的替代，可以用作`mpmc`。本来之前标准库中有`mpmc`，但是也去掉了，推荐使用`crossbeam`
+
+就只有两种选择，是否需要容量限制:
+- `bounded`
+- `unbounded`
+
+但再想这个具体的场景，可能存在很多task的Waker，在某一时间可能都要给executor发消息激活一下，理想状况下，应该是一个`bounded(1)`的有界`channel`，但是发送方不阻塞(`try_send`)，满了就跳过。此时executor被唤醒，执行下一次`[wake_tasks -> run_ready_tasks]`的循环。有可能在`wake_tasks`时出现新的可用任务，`channel`当然被填上，但是新任务也被`wake_tasks`取走，等`run_ready_tasks`完成，`sleep_if_idle`时检查到新任务为空，但是`channel`中存在item，因为无法确定这个item到底是什么时候产生的，`wake_tasks`还是`run_ready_tasks`，只好再尝试循环一遍。
+
+> 💡又搜到这个文章，用的却是park/unpark，之后对比看 [构建你自己的block_on](https://colobu.com/2020/01/30/build-your-own-block-on/)

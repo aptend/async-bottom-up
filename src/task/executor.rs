@@ -1,8 +1,9 @@
-
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker, Wake};
+use std::task::{Context, Poll, RawWaker, RawWakerVTable, Wake, Waker};
+use std::future::Future;
 
+use crossbeam::channel::{bounded, Receiver, Sender, TrySendError};
 use crossbeam::queue::ArrayQueue;
 
 use super::{Task, TaskId};
@@ -25,6 +26,7 @@ fn dummy_waker() -> Waker {
 
 struct TaskWaker {
     task_id: TaskId,
+    wake_chan: Sender<()>,
     wake_queue: Arc<ArrayQueue<TaskId>>,
 }
 
@@ -32,6 +34,10 @@ impl TaskWaker {
     fn wake_task(&self) {
         println!("  wake task {:?}", self.task_id);
         self.wake_queue.push(self.task_id).expect("wake_queue full");
+        match self.wake_chan.try_send(()) {
+            Err(TrySendError::Disconnected(_)) => panic!("disconnected wake_chan"),
+            _ => {}
+        }
     }
 }
 
@@ -50,15 +56,20 @@ pub struct Executor {
     waiting_tasks: BTreeMap<TaskId, Task>,
     wake_queue: Arc<ArrayQueue<TaskId>>,
     waker_cache: BTreeMap<TaskId, Waker>,
+    wake_chan_sender: Sender<()>,
+    wake_chan_receiver: Receiver<()>,
 }
 
 impl Executor {
     pub fn new() -> Executor {
+        let (s, r) = bounded(1);
         Executor {
             task_queue: VecDeque::new(),
             waiting_tasks: BTreeMap::new(),
             wake_queue: Arc::new(ArrayQueue::new(100)),
             waker_cache: BTreeMap::new(),
+            wake_chan_sender: s,
+            wake_chan_receiver: r,
         }
     }
 
@@ -94,7 +105,8 @@ impl Executor {
     fn create_waker(&self, task_id: TaskId) -> Waker {
         Waker::from(Arc::new(TaskWaker {
             task_id,
-            wake_queue: self.wake_queue.clone()
+            wake_chan: self.wake_chan_sender.clone(),
+            wake_queue: self.wake_queue.clone(),
         }))
     }
 
@@ -107,14 +119,22 @@ impl Executor {
         }
     }
 
+    fn sleep_if_idle(&self) {
+        if self.wake_queue.is_empty() {
+            self.wake_chan_receiver.recv().expect("can't recv from wake_chan");
+            println!("  wake up to work, something new might come up");
+        }
+    }
+
     pub fn run(&mut self) {
-        use std::time;
-        use std::thread;
-        let secs = time::Duration::from_secs(4);
         loop {
             self.wake_tasks();
             self.run_ready_tasks();
-            thread::sleep(secs);
+            if self.waiting_tasks.len() == 0 {
+                break;
+            }
+            self.sleep_if_idle();
         }
     }
 }
+
