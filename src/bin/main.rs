@@ -1,4 +1,4 @@
-use async_bottom_up::task::{simple_executor::SimpleExecutor, Task};
+use async_bottom_up::task::{executor::Executor, Task};
 use async_std::io;
 
 async fn async_numebr() -> u32 {
@@ -21,7 +21,7 @@ async fn read_user_input() {
 }
 
 fn main() {
-    let mut exec = SimpleExecutor::new();
+    let mut exec = Executor::new();
     exec.spawn(Task::new(find_answer()));
     exec.spawn(Task::new(read_user_input()));
     exec.run();
