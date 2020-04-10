@@ -13,3 +13,7 @@ crossbeam = "0.7.3"
 
 [dev-dependencies]
 criterion = "0.3.1"
+
+[[bench]]
+name = "executor_bench"
+harness = false

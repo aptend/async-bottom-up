@@ -1,7 +1,6 @@
-#![feature(test)]
-extern crate test;
 
-use test::Bencher;
+use criterion::{Criterion, BenchmarkId, criterion_group, criterion_main};
+
 use futures;
 
 use std::future::Future;
@@ -46,35 +45,17 @@ use async_bottom_up::task::executor;
 // }
 
 
-#[bench]
-fn custom_block_on_0_yields(b: &mut Bencher) {
-    b.iter(|| executor::block_on(Yields(0)));
+fn bench_block_on(c: &mut Criterion) {
+    for i in &[0, 10, 50] {
+        c.bench_with_input(BenchmarkId::new("my_block_on", i), i, |b, i| {
+            b.iter(|| executor::block_on(Yields(*i)));
+        });
+        c.bench_with_input(BenchmarkId::new("futures_block_on", i), i, |b, i| {
+            b.iter(|| futures::executor::block_on(Yields(*i)));
+        });
+    }
 }
 
-#[bench]
-fn custom_block_on_10_yields(b: &mut Bencher) {
-    b.iter(|| executor::block_on(Yields(10)));
-}
-
-#[bench]
-fn custom_block_on_50_yields(b: &mut Bencher) {
-    b.iter(|| executor::block_on(Yields(50)));
-}
-
-#[bench]
-fn futures_block_on_0_yields(b: &mut Bencher) {
-    b.iter(|| futures::executor::block_on(Yields(0)));
-}
-
-#[bench]
-fn futures_block_on_10_yields(b: &mut Bencher) {
-    b.iter(|| futures::executor::block_on(Yields(10)));
-}
-
-#[bench]
-fn futures_block_on_50_yields(b: &mut Bencher) {
-    b.iter(|| futures::executor::block_on(Yields(50)));
-}
 
 struct Yields(u32);
 
@@ -91,3 +72,6 @@ impl Future for Yields {
         }
     }
 }
+
+criterion_group!(benches, bench_block_on);
+criterion_main!(benches);

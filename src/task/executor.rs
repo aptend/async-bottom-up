@@ -32,7 +32,7 @@ struct TaskWaker {
 
 impl TaskWaker {
     fn wake_task(&self) {
-        println!("  wake task {:?}", self.task_id);
+        // println!("  wake task {:?}", self.task_id);
         self.wake_queue.push(self.task_id).expect("wake_queue full");
         match self.wake_chan.try_send(()) {
             Err(TrySendError::Disconnected(_)) => panic!("disconnected wake_chan"),
@@ -122,7 +122,7 @@ impl Executor {
     fn sleep_if_idle(&self) {
         if self.wake_queue.is_empty() {
             self.wake_chan_receiver.recv().expect("can't recv from wake_chan");
-            println!("  wake up to work, something new might come up");
+            // println!("  wake up to work, something new might come up");
         }
     }
 
@@ -139,6 +139,7 @@ impl Executor {
 }
 
 pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
+    // let (s, r) = bounded(1);
     let mut exec = Executor::new();
     exec.spawn(Task::new(f));
     exec.run();
