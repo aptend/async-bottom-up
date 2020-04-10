@@ -192,7 +192,10 @@ em，既然在条件变量和channel里面选，那自然还是channel好用
 > 💡又搜到这个文章，用的却是park/unpark，之后对比看 [构建你自己的block_on](https://colobu.com/2020/01/30/build-your-own-block-on/)
 
 
-呆瓜block_on
+### Bench
+
+参考提到的文章，先做了一个的呆瓜block_on
+
 ```rust
 pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
     let mut exec = Executor::new();
@@ -202,15 +205,67 @@ pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
 ```
 
 ```shell
-test custom_block_on_0_yields   ... bench:         747 ns/iter (+/- 58)
-test custom_block_on_10_yields  ... bench:       4,502 ns/iter (+/- 406)
-test custom_block_on_50_yields  ... bench:      19,220 ns/iter (+/- 1,581)
-test futures_block_on_0_yields  ... bench:           9 ns/iter (+/- 0)
-test futures_block_on_10_yields ... bench:         211 ns/iter (+/- 9)
-test futures_block_on_50_yields ... bench:       1,032 ns/iter (+/- 49)
+test custom_block_on_0_yields   ... bench:       1,024 ns/iter (+/- 178)
+test custom_block_on_10_yields  ... bench:       2,559 ns/iter (+/- 446)
+test custom_block_on_50_yields  ... bench:       8,094 ns/iter (+/- 941)
+test futures_block_on_0_yields  ... bench:          17 ns/iter (+/- 10)
+test futures_block_on_10_yields ... bench:         211 ns/iter (+/- 14)
+test futures_block_on_50_yields ... bench:       1,093 ns/iter (+/- 163))
 ```
+
+大概是8倍的差距
 
 tomorrow TODO:
 
 - 用criterion做一下测试看
 - 对block_on而言，`waiting_tasks`这种东西不需要，重写一下，看基于park/unpark和channel的区别
+
+这是用`criterion`做的，差不多
+```shell
+my_block_on/0           time:   [1.0137 us 1.0232 us 1.0342 us]
+futures_block_on/0      time:   [9.7263 ns 9.7882 ns 9.8564 ns]
+
+my_block_on/10          time:   [2.5477 us 2.5659 us 2.5855 us]
+futures_block_on/10     time:   [214.61 ns 216.91 ns 220.16 ns]
+
+my_block_on/50          time:   [8.1675 us 8.2860 us 8.4119 us]
+futures_block_on/50     time:   [1.1682 us 1.2561 us 1.3533 us]
+```
+
+
+把block_on换成这样，单纯使用`bounded(1)`来唤醒和睡眠
+```rust
+pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
+    let (s, r) = bounded(1);
+    let mut task = Task::new(f);
+    let waker = Waker::from(Arc::new(BlockWaker {
+        wake_chan: s
+    }));
+    let mut context = Context::from_waker(&waker);
+    loop {
+         match task.poll(&mut context) {
+            Poll::Pending => {
+                r.recv().expect("can't recv from wake_chan");
+            }
+            Poll::Ready(()) => {
+                break;
+            }
+        }
+    }
+}
+```
+
+测试结果为
+```shell
+my_block_on/0           time:   [455.37 ns 460.43 ns 465.97 ns]
+futures_block_on/0      time:   [10.334 ns 10.388 ns 10.452 ns]
+
+my_block_on/10          time:   [796.13 ns 802.44 ns 809.36 ns]
+futures_block_on/10     time:   [210.88 ns 211.63 ns 212.46 ns]
+
+my_block_on/50          time:   [2.1114 us 2.1537 us 2.2059 us]
+futures_block_on/50     time:   [1.0507 us 1.0558 us 1.0625 us]
+```
+
+`/0`实际上没有用到Waker，所以`my_block_on`光是初始化的时间就是`futures`的40倍  
+`/50`分摊初始化的时间后，性能是2~3倍，所以`bounded(1)`的初始化和效率还是低于`park/unpark`方案的

@@ -138,9 +138,44 @@ impl Executor {
     }
 }
 
+struct BlockWaker {
+    wake_chan: Sender<()>
+}
+
+impl BlockWaker {
+    fn wake_task(&self) {
+        match self.wake_chan.try_send(()) {
+            Err(TrySendError::Disconnected(_)) => panic!("disconnected wake_chan"),
+            _ => {}
+        }
+    }
+}
+
+impl Wake for BlockWaker {
+    fn wake(self: Arc<Self>) {
+        self.wake_task();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.wake_task();
+    }
+}
+
 pub fn block_on<F: Future<Output=()> + 'static>(f: F) {
-    // let (s, r) = bounded(1);
-    let mut exec = Executor::new();
-    exec.spawn(Task::new(f));
-    exec.run();
+    let (s, r) = bounded(1);
+    let mut task = Task::new(f);
+    let waker = Waker::from(Arc::new(BlockWaker {
+        wake_chan: s
+    }));
+    let mut context = Context::from_waker(&waker);
+    loop {
+         match task.poll(&mut context) {
+            Poll::Pending => {
+                r.recv().expect("can't recv from wake_chan");
+            }
+            Poll::Ready(()) => {
+                break;
+            }
+        }
+    }
 }
